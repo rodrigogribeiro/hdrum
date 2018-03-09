@@ -1,7 +1,7 @@
 {-#LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses, UndecidableInstances #-}
 
 module Language.HDrum
-{-  (
+  (
     Instrument (..)
   , Step (..)
   , DrumPattern
@@ -9,17 +9,20 @@ module Language.HDrum
   , hits
   , rests
   , normalize
-  , (.++) -- sequential composition
-  , (.&)  -- single track creation
-  , (.||) -- parallel track composition
-  , (.*)  -- repetition operator
-  , wf    -- well formedness
-  , dur   -- duration
-  , pfold -- fold operator for patterns
-  , tfold -- fold operator for tracks
-  ) -} where
+  , (.++)    -- sequential composition
+  , (.&)     -- single track creation
+  , (.||)    -- parallel track composition
+  , (.*)     -- repetition operator
+  , wf       -- well formedness
+  , dur      -- duration
+  , (.++.)
+  , fromList -- conversion from lists to patterns
+  , toList   -- conversion to lists
+  , tfold    -- fold operator for tracks
+  ) where
 
 import Control.Monad
+import Data.Monoid
 import Prelude hiding (repeat)
 import Test.QuickCheck
 
@@ -27,17 +30,21 @@ data Instrument = Clap | Cymbal | Cuica deriving (Eq, Ord, Show, Enum)
 
 data Step = X | O deriving (Eq, Ord, Show)
 
-data DrumPattern
-  = Step :> DrumPattern | End Step
+-- an empty pattern is just DrumPattern []
+
+newtype DrumPattern
+  = DrumPattern {out :: [Step]}
     deriving (Eq, Ord, Show)
 
-pfold :: (Step -> b) -> (Step -> b -> b) -> DrumPattern -> b
-pfold f _ (End s)  = f s
-pfold f g (s :> d) = g s (pfold f g d)
+toList :: DrumPattern -> [Step]
+toList = out
+
+fromList :: [Step] -> DrumPattern
+fromList = DrumPattern
 
 (.++.) :: DrumPattern -> DrumPattern -> DrumPattern
-(End s) .++. d' = s :> d'
-(s :> d) .++. d' = s :> (d .++. d')
+(DrumPattern ds) .++. (DrumPattern ds1) =
+  DrumPattern (ds ++ ds1)
 
 data Track
   = Instrument :& DrumPattern
@@ -61,10 +68,16 @@ instance Dur Step where
   dur _ = 1
 
 instance Dur DrumPattern where
-  dur = pfold (\ _ -> 1) (\ _ ac -> 1 + ac)
+  dur = foldr ((+) . dur) 0 . out 
 
 instance Dur Track where
   dur = tfold (\ _ -> dur) max
+
+-- drum pattern monoid
+
+instance Monoid DrumPattern where
+  mappend = (.++.)
+  mempty  = DrumPattern []
 
 -- repeat
 
@@ -74,9 +87,7 @@ class Repeat a where
 
 instance Repeat Step where
   type R Step = DrumPattern
-  repeat n x
-      | n <= 1 = End x
-      | otherwise = x :> repeat (n - 1) x
+  repeat n x = DrumPattern $ replicate n x
 
 instance Repeat DrumPattern where
   type R DrumPattern = DrumPattern
@@ -107,17 +118,17 @@ class Sequential a b where
 instance Sequential Step Step where
   type S Step Step = DrumPattern
 
-  s .++ s' = s :> (End s')
+  s .++ s' = DrumPattern [s, s']
 
 instance Sequential Step DrumPattern where
   type S Step DrumPattern = DrumPattern
 
-  s .++ d = (s :> d)
+  s .++ (DrumPattern d) = DrumPattern (s : d)
 
 instance Sequential DrumPattern Step where
   type S DrumPattern Step = DrumPattern
 
-  d .++ s = d .++. (End s)
+  (DrumPattern d) .++ s = DrumPattern (d ++ [s])  
  
 instance Sequential DrumPattern DrumPattern where
   type S DrumPattern DrumPattern = DrumPattern
@@ -158,7 +169,7 @@ normalize t
               | dur d < n = i :& (d .++. rests (n - dur d))
               | otherwise = i :& d
       normalize' (t1 :|| t2) n = (normalize' t1 n) :|| (normalize' t2 n) 
-  
+
 sumTrack :: Track -> Track -> Track
 sumTrack t1 t2
   = foldr1 (:||) (map (uncurry (:&)) (same ++ diff1 ++ diff2))
@@ -190,11 +201,7 @@ instance Arbitrary Step where
 
 genDrumPattern :: Int -> Gen DrumPattern
 genDrumPattern n
-  = toDrumPat <$> vectorOf n (arbitrary :: Gen Step)
-    where
-      toDrumPat [] = End O -- this is impossible
-      toDrumPat [ x ] = End x
-      toDrumPat (x : xs) = x :> toDrumPat xs
+  = DrumPattern <$> vectorOf n (arbitrary :: Gen Step)
 
 genTrack :: Int -> Int -> Gen Track
 genTrack s n
@@ -205,7 +212,7 @@ genTrack s n
 
 instance Arbitrary DrumPattern where
   arbitrary
-    = choose (1,3) >>= genDrumPattern
+    = choose (0,3) >>= genDrumPattern
 
 instance Arbitrary Track where
   arbitrary

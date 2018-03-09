@@ -34,6 +34,48 @@ seqTrackDur :: Property
 seqTrackDur
   = forAll (arbitrary :: Gen Track)(\t1 -> forAll (arbitrary :: Gen Track) (\t2 -> dur t1 + dur t2 == dur (t1 .++ t2)))
 
+-- 3. algebraic properties of drum patterns
+
+idDrumPatLeft :: Property
+idDrumPatLeft
+  = forAll (arbitrary :: Gen DrumPattern)
+           (\ d -> d .++ (fromList []) == d)
+
+idDrumPatRight :: Property
+idDrumPatRight
+  = forAll (arbitrary :: Gen DrumPattern)
+           (\ d -> (fromList []) .++ d == d)
+ 
+
+drumPatAssoc :: Property
+drumPatAssoc
+  = forAll (arbitrary :: Gen DrumPattern)
+           (\ d1 -> forAll (arbitrary :: Gen DrumPattern)
+                           (\ d2 -> forAll (arbitrary :: Gen DrumPattern)
+                                           (\ d3 -> let
+                                                     x = ((d1 .++ d2) .++ d3) :: DrumPattern
+                                                     y = (d1 .++ (d2 .++ d3)) :: DrumPattern
+                                                    in x == y)))
+
+-- 4. algebraic properties of tracks
+
+instruments :: Track -> [Instrument]
+instruments = tfold (\ i _ -> [i]) (++)
+
+idTrackLeft :: Property
+idTrackLeft
+  = forAll (arbitrary :: Gen Track)
+           (\ t -> forAll (elements (instruments t))
+                          (\ i -> t .++ (i .& mempty) == t))
+
+
+idTrackRight :: Property
+idTrackRight
+  = forAll (arbitrary :: Gen Track)
+           (\ t -> forAll (elements (instruments t))
+                          (\ i -> (i .& mempty) .++ t == t))
+
+
 main :: IO ()
 main
   = do
@@ -47,6 +89,16 @@ main
       quickCheck normalizeWf
       putStrLn "Sequential composition track wf"
       quickCheck seqTrackWf
-      putStrLn "Sequential compoistion track duration"
+      putStrLn "Sequential composition track duration"
       quickCheck seqTrackDur
+      putStrLn "Empty pattern identity left"
+      quickCheck idDrumPatLeft
+      putStrLn "Empty pattern identity right"
+      quickCheck idDrumPatRight
+      putStrLn "Drum pattern sequential composition is associative"
+      quickCheck drumPatAssoc
+      putStrLn "Identity for sequential composition of tracks left"
+      quickCheck idTrackLeft
+      putStrLn "Identity for sequential composition of tracks right"
+      quickCheck idTrackRight
 
